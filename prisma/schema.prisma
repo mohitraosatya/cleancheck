@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Users ────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  role         Role     @default(EMPLOYEE)
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  assignedProperties PropertyAssignment[]
+  createdTasks       Task[]
+  notifications      Notification[]
+}
+
+enum Role {
+  OWNER
+  EMPLOYEE
+}
+
+// ── Properties ───────────────────────────────────────────────────────────────
+
+model Property {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  createdAt DateTime @default(now())
+
+  assignments       PropertyAssignment[]
+  tasks             Task[]
+  checklistTemplate ChecklistTemplate?
+  inventoryTemplate InventoryTemplate?
+}
+
+model PropertyAssignment {
+  id         String   @id @default(cuid())
+  userId     String
+  propertyId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, propertyId])
+  @@index([propertyId])
+  @@index([userId])
+}
+
+// ── Checklist Template ───────────────────────────────────────────────────────
+
+model ChecklistTemplate {
+  id         String          @id @default(cuid())
+  propertyId String          @unique
+  property   Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  items      ChecklistItem[]
+}
+
+model ChecklistItem {
+  id         String @id @default(cuid())
+  templateId String
+  label      String
+  order      Int    @default(0)
+
+  template  ChecklistTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  responses ChecklistResponse[]
+
+  @@index([templateId])
+}
+
+// ── Tasks ────────────────────────────────────────────────────────────────────
+
+model Task {
+  id              String        @id @default(cuid())
+  propertyId      String
+  createdByUserId String
+  dateKey         String
+  status          TaskStatus    @default(OPEN)
+  notes           String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  reviewStatus    ReviewStatus?
+  reviewComment   String?
+  createdAt       DateTime      @default(now())
+
+  property           Property            @relation(fields: [propertyId], references: [id])
+  createdBy          User                @relation(fields: [createdByUserId], references: [id])
+  checklistResponses ChecklistResponse[]
+  photos             Photo[]
+  inventoryCounts    InventoryCount[]
+  notifications      Notification[]
+
+  @@unique([propertyId, dateKey])
+  @@index([propertyId, dateKey])
+  @@index([status])
+  @@index([createdByUserId])
+}
+
+enum TaskStatus {
+  OPEN
+  SUBMITTED
+  APPROVED
+  NEEDS_REDO
+}
+
+enum ReviewStatus {
+  APPROVED
+  NEEDS_REDO
+}
+
+model ChecklistResponse {
+  id              String  @id @default(cuid())
+  taskId          String
+  checklistItemId String
+  checked         Boolean @default(false)
+
+  task          Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  checklistItem ChecklistItem @relation(fields: [checklistItemId], references: [id])
+
+  @@unique([taskId, checklistItemId])
+  @@index([taskId])
+}
+
+// ── Photos ───────────────────────────────────────────────────────────────────
+
+model Photo {
+  id        String    @id @default(cuid())
+  taskId    String
+  type      PhotoType
+  url       String
+  createdAt DateTime  @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+enum PhotoType {
+  PRE
+  POST
+  INVENTORY
+}
+
+// ── Inventory Template ───────────────────────────────────────────────────────
+
+model InventoryTemplate {
+  id         String          @id @default(cuid())
+  propertyId String          @unique
+  enabled    Boolean         @default(false)
+  property   Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  items      InventoryItem[]
+}
+
+model InventoryItem {
+  id         String  @id @default(cuid())
+  templateId String
+  name       String
+  threshold  Int?
+  order      Int     @default(0)
+
+  template InventoryTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  counts   InventoryCount[]
+
+  @@index([templateId])
+}
+
+model InventoryCount {
+  id              String @id @default(cuid())
+  taskId          String
+  inventoryItemId String
+  count           Int?
+
+  task          Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@unique([taskId, inventoryItemId])
+  @@index([taskId])
+}
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id          String    @id @default(cuid())
+  ownerUserId String
+  type        String
+  taskId      String?
+  message     String?
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+
+  owner User  @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  task  Task? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([ownerUserId, readAt])
+}
