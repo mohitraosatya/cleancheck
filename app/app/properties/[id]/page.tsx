@@ -4,19 +4,23 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
   CheckCircle2, Circle, ChevronDown, ChevronUp, X,
-  Camera, ImageIcon, AlertCircle, CheckCheck
+  Camera, ImageIcon, AlertCircle, CheckCheck, LogIn, LogOut as LogOutIcon
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
-import { cn, statusLabel, statusClass } from '@/lib/utils'
+import { cn, statusLabel, statusClass, levelLabel, levelClass, formatDate } from '@/lib/utils'
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+type InventoryLevel = 'NONE' | 'LOW' | 'MEDIUM' | 'FULL'
 
 interface ChecklistItem { id: string; label: string; order: number }
 interface ChecklistResponse { id: string; checklistItemId: string; checked: boolean; checklistItem: ChecklistItem }
 interface Photo { id: string; type: string; url: string }
-interface InventoryItem { id: string; name: string; threshold: number | null; order: number }
-interface InventoryCount { id: string; inventoryItemId: string; count: number | null; inventoryItem: InventoryItem }
+interface InventoryItem { id: string; name: string; order: number }
+interface InventoryCount { id: string; inventoryItemId: string; level: InventoryLevel | null; inventoryItem: InventoryItem }
+interface GuestStay { id: string; guestName: string | null; checkIn: string; checkOut: string }
+interface Assignment { user: { id: string; name: string } }
 
 interface Task {
   id: string
@@ -26,6 +30,8 @@ interface Task {
   checklistResponses: ChecklistResponse[]
   photos: Photo[]
   inventoryCounts: InventoryCount[]
+  guestStay: GuestStay | null
+  assignments: Assignment[]
 }
 
 interface InventoryTemplate {
@@ -33,6 +39,8 @@ interface InventoryTemplate {
   enabled: boolean
   items: InventoryItem[]
 }
+
+const LEVELS: InventoryLevel[] = ['NONE', 'LOW', 'MEDIUM', 'FULL']
 
 // ── Main Page ────────────────────────────────────────────────────────────────
 
@@ -54,10 +62,6 @@ export default function TaskPage() {
   const [notes, setNotes] = useState('')
   const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ── Inventory counts stored separately so controlled inputs stay stable ──
-  // key: inventoryItemId → string value of the input
-  const [counts, setCounts] = useState<Record<string, string>>({})
-
   const preRef = useRef<HTMLInputElement>(null)
   const postRef = useRef<HTMLInputElement>(null)
   const invRef = useRef<HTMLInputElement>(null)
@@ -72,13 +76,6 @@ export default function TaskPage() {
       setTask(data.task)
       setInvTemplate(data.inventoryTemplate)
       setNotes(data.task?.notes ?? '')
-
-      // Init counts from existing DB data
-      const init: Record<string, string> = {}
-      for (const c of (data.task?.inventoryCounts ?? []) as InventoryCount[]) {
-        if (c.count !== null) init[c.inventoryItemId] = String(c.count)
-      }
-      setCounts(init)
     } catch {
       setError('Failed to load task')
     } finally {
@@ -87,15 +84,13 @@ export default function TaskPage() {
   }, [propertyId])
 
   useEffect(() => { fetchTask() }, [fetchTask])
-
-  // Cleanup notes debounce on unmount
   useEffect(() => () => { if (notesTimerRef.current) clearTimeout(notesTimerRef.current) }, [])
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
-  const prePhotos  = task?.photos.filter((p) => p.type === 'PRE')  ?? []
-  const postPhotos = task?.photos.filter((p) => p.type === 'POST') ?? []
-  const invPhotos  = task?.photos.filter((p) => p.type === 'INVENTORY') ?? []
+  const prePhotos  = task?.photos.filter((p: Photo) => p.type === 'PRE')  ?? []
+  const postPhotos = task?.photos.filter((p: Photo) => p.type === 'POST') ?? []
+  const invPhotos  = task?.photos.filter((p: Photo) => p.type === 'INVENTORY') ?? []
 
   const canEdit   = task?.status === 'OPEN' || task?.status === 'NEEDS_REDO'
   const canSubmit = canEdit && postPhotos.length >= 1 && invPhotos.length >= 1
@@ -105,9 +100,9 @@ export default function TaskPage() {
   const toggleCheck = async (res: ChecklistResponse) => {
     if (!task || !canEdit) return
     const next = !res.checked
-    setTask((t) => t ? {
+    setTask((t: Task | null) => t ? {
       ...t,
-      checklistResponses: t.checklistResponses.map((r) =>
+      checklistResponses: t.checklistResponses.map((r: ChecklistResponse) =>
         r.id === res.id ? { ...r, checked: next } : r
       ),
     } : t)
@@ -128,18 +123,17 @@ export default function TaskPage() {
       const upRes = await fetch('/api/upload', { method: 'POST', body: fd })
       if (!upRes.ok) {
         const err = await upRes.json().catch(() => ({}))
-        alert(err.error ?? 'Upload failed')
+        alert((err as { error?: string }).error ?? 'Upload failed')
         return
       }
       const { url } = await upRes.json()
-
       const photoRes = await fetch(`/api/tasks/${task.id}/photos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, url }),
       })
       const { photo } = await photoRes.json()
-      setTask((t) => t ? { ...t, photos: [...t.photos, photo] } : t)
+      setTask((t: Task | null) => t ? { ...t, photos: [...t.photos, photo as Photo] } : t)
     } finally {
       setUploading((u) => ({ ...u, [type]: false }))
     }
@@ -147,21 +141,37 @@ export default function TaskPage() {
 
   const deletePhoto = async (photoId: string) => {
     if (!task || !canEdit) return
-    setTask((t) => t ? { ...t, photos: t.photos.filter((p) => p.id !== photoId) } : t)
+    setTask((t: Task | null) => t ? { ...t, photos: t.photos.filter((p: Photo) => p.id !== photoId) } : t)
     await fetch(`/api/tasks/${task.id}/photos/${photoId}`, { method: 'DELETE' })
   }
 
-  // Inventory count — uses separate `counts` state so controlled inputs stay stable
-  const updateCount = async (inventoryItemId: string, value: string) => {
+  const updateLevel = async (inventoryItemId: string, level: InventoryLevel | null) => {
     if (!task || !canEdit) return
-    // Update controlled input state immediately
-    setCounts((prev) => ({ ...prev, [inventoryItemId]: value }))
-    // Persist to DB
-    const count = value === '' ? null : Number(value)
+    setTask((t: Task | null) => {
+      if (!t) return t
+      const existing = t.inventoryCounts.find((c: InventoryCount) => c.inventoryItemId === inventoryItemId)
+      if (existing) {
+        return {
+          ...t,
+          inventoryCounts: t.inventoryCounts.map((c: InventoryCount) =>
+            c.inventoryItemId === inventoryItemId ? { ...c, level } : c
+          ),
+        }
+      }
+      return {
+        ...t,
+        inventoryCounts: [...t.inventoryCounts, {
+          id: `temp-${inventoryItemId}`,
+          inventoryItemId,
+          level,
+          inventoryItem: invTemplate!.items.find((i: InventoryItem) => i.id === inventoryItemId)!,
+        }],
+      }
+    })
     await fetch(`/api/tasks/${task.id}/inventory`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inventoryItemId, count }),
+      body: JSON.stringify({ inventoryItemId, level }),
     })
   }
 
@@ -188,10 +198,10 @@ export default function TaskPage() {
       body: JSON.stringify({ notes }),
     })
     if (res.ok) {
-      setTask((t) => t ? { ...t, status: 'SUBMITTED' } : t)
+      setTask((t: Task | null) => t ? { ...t, status: 'SUBMITTED' } : t)
     } else {
       const d = await res.json()
-      alert(d.error ?? 'Submit failed')
+      alert((d as { error?: string }).error ?? 'Submit failed')
     }
     setSubmitting(false)
   }
@@ -219,7 +229,6 @@ export default function TaskPage() {
   const submitted = task.status === 'SUBMITTED' || task.status === 'APPROVED'
   const needsRedo = task.status === 'NEEDS_REDO'
 
-  // Hint shown on disabled submit button
   const submitHint = !canEdit ? null
     : postPhotos.length < 1 ? 'Add a post-clean photo first'
     : invPhotos.length < 1 ? 'Add an inventory photo first'
@@ -241,6 +250,30 @@ export default function TaskPage() {
             {statusLabel(task.status)}
           </span>
         </div>
+
+        {/* Guest stay info */}
+        {task.guestStay && (
+          <div className="mt-3 flex items-center gap-4 text-xs text-neutral-500 bg-white border border-neutral-200 rounded-xl px-4 py-3">
+            <span className="flex items-center gap-1.5">
+              <LogIn className="w-3.5 h-3.5 text-green-600" />
+              {formatDate(task.guestStay.checkIn)}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <LogOutIcon className="w-3.5 h-3.5 text-red-500" />
+              {formatDate(task.guestStay.checkOut)}
+            </span>
+            {task.guestStay.guestName && (
+              <span className="ml-auto font-medium text-neutral-700">{task.guestStay.guestName}</span>
+            )}
+          </div>
+        )}
+
+        {/* Assigned cleaners */}
+        {task.assignments.length > 0 && (
+          <p className="mt-2 text-xs text-neutral-400">
+            Assigned: {task.assignments.map((a) => a.user.name).join(', ')}
+          </p>
+        )}
 
         {needsRedo && (
           <div className="mt-3 p-3 bg-neutral-900 text-white rounded-xl text-sm">
@@ -291,7 +324,6 @@ export default function TaskPage() {
         count={postPhotos.length + prePhotos.length}
         badge={canEdit && postPhotos.length === 0 ? 'Post-clean required' : undefined}
       >
-        {/* Pre-clean */}
         <div className="mb-5">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">
             Pre-clean <span className="text-neutral-400 font-normal normal-case">(optional)</span>
@@ -303,21 +335,10 @@ export default function TaskPage() {
             uploading={!!uploading['PRE']}
             onAdd={() => preRef.current?.click()}
           />
-          <input
-            ref={preRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) uploadPhoto(f, 'PRE')
-              e.target.value = ''
-            }}
-          />
+          <input ref={preRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f, 'PRE'); e.target.value = '' }} />
         </div>
 
-        {/* Post-clean */}
         <div>
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">
             Post-clean <span className="text-red-400 font-normal normal-case">required</span>
@@ -329,18 +350,8 @@ export default function TaskPage() {
             uploading={!!uploading['POST']}
             onAdd={() => postRef.current?.click()}
           />
-          <input
-            ref={postRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) uploadPhoto(f, 'POST')
-              e.target.value = ''
-            }}
-          />
+          <input ref={postRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f, 'POST'); e.target.value = '' }} />
         </div>
       </SectionCard>
 
@@ -352,7 +363,6 @@ export default function TaskPage() {
         count={invPhotos.length}
         badge={canEdit && invPhotos.length === 0 ? 'Photo required' : undefined}
       >
-        {/* Inventory photo */}
         <div className={invTemplate?.enabled && invTemplate.items.length > 0 ? 'mb-5' : ''}>
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">
             Proof photo <span className="text-red-400 font-normal normal-case">required</span>
@@ -364,51 +374,36 @@ export default function TaskPage() {
             uploading={!!uploading['INVENTORY']}
             onAdd={() => invRef.current?.click()}
           />
-          <input
-            ref={invRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) uploadPhoto(f, 'INVENTORY')
-              e.target.value = ''
-            }}
-          />
+          <input ref={invRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f, 'INVENTORY'); e.target.value = '' }} />
         </div>
 
-        {/* Counts table — only if template enabled with items */}
         {invTemplate?.enabled && invTemplate.items.length > 0 && (
           <div>
-            <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">
-              Counts
-            </p>
-            <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">Levels</p>
+            <div className="flex flex-col gap-3">
               {invTemplate.items.map((item) => {
-                const rawVal = counts[item.id] ?? ''
-                const numVal = rawVal === '' ? null : Number(rawVal)
-                const isLow = item.threshold !== null && numVal !== null && numVal < item.threshold
+                const current = task.inventoryCounts.find((c) => c.inventoryItemId === item.id)?.level ?? null
                 return (
-                  <div key={item.id} className="flex items-center gap-3 py-2.5 border-b border-neutral-50 last:border-0">
+                  <div key={item.id} className="flex items-center gap-3">
                     <span className="flex-1 text-sm">{item.name}</span>
-                    {isLow && (
-                      <span className="text-xs font-semibold bg-neutral-900 text-white px-2 py-0.5 rounded-full">
-                        Low
-                      </span>
-                    )}
-                    {item.threshold !== null && (
-                      <span className="text-xs text-neutral-400">min {item.threshold}</span>
-                    )}
-                    <input
-                      type="number"
-                      min={0}
-                      disabled={!canEdit}
-                      value={rawVal}
-                      onChange={(e) => updateCount(item.id, e.target.value)}
-                      placeholder="—"
-                      className="w-20 text-right h-9 rounded-lg border border-neutral-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:bg-neutral-50 disabled:text-neutral-400"
-                    />
+                    <div className="flex gap-1">
+                      {LEVELS.map((lvl) => (
+                        <button
+                          key={lvl}
+                          disabled={!canEdit}
+                          onClick={() => updateLevel(item.id, current === lvl ? null : lvl)}
+                          className={cn(
+                            'px-2.5 py-1 rounded-full text-xs font-semibold transition-colors border',
+                            current === lvl
+                              ? levelClass(lvl) + ' border-transparent'
+                              : 'bg-white border-neutral-200 text-neutral-400 hover:border-neutral-400 disabled:opacity-50 disabled:cursor-default'
+                          )}
+                        >
+                          {levelLabel(lvl)}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )
               })}
@@ -430,26 +425,18 @@ export default function TaskPage() {
         />
       </div>
 
-      {/* Sticky Submit */}
+      {/* Sticky bottom */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-neutral-100 px-4 py-3 pb-safe">
         {submitted ? (
           <div className="flex items-center justify-center gap-2 py-2 text-sm font-medium text-neutral-600">
             <CheckCheck className="w-5 h-5" />
-            Task {task.status === 'APPROVED' ? 'Approved ✓' : 'Submitted — awaiting review'}
+            {task.status === 'APPROVED' ? 'Approved ✓' : 'Marked as done — awaiting review'}
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {submitHint && (
-              <p className="text-xs text-center text-neutral-400">{submitHint}</p>
-            )}
-            <Button
-              size="lg"
-              className="w-full"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              loading={submitting}
-            >
-              {submitting ? 'Submitting…' : 'Submit Task'}
+            {submitHint && <p className="text-xs text-center text-neutral-400">{submitHint}</p>}
+            <Button size="lg" className="w-full" onClick={handleSubmit} disabled={!canSubmit} loading={submitting}>
+              {submitting ? 'Saving…' : 'Mark as Done'}
             </Button>
           </div>
         )}
@@ -482,9 +469,7 @@ function SectionCard({
           {total !== undefined && (
             <span className="text-xs text-neutral-400">{count}/{total}</span>
           )}
-          {badge && (
-            <span className="text-xs text-red-400 font-medium">{badge}</span>
-          )}
+          {badge && <span className="text-xs text-red-400 font-medium">{badge}</span>}
         </div>
         {open ? <ChevronUp className="w-4 h-4 text-neutral-400" /> : <ChevronDown className="w-4 h-4 text-neutral-400" />}
       </button>
@@ -529,12 +514,7 @@ function PhotoGrid({
         >
           {uploading
             ? <Spinner size="sm" />
-            : (
-              <>
-                <Camera className="w-5 h-5" />
-                <span className="text-[10px]">Add</span>
-              </>
-            )
+            : <><Camera className="w-5 h-5" /><span className="text-[10px]">Add</span></>
           }
         </button>
       )}

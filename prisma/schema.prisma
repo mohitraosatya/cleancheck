@@ -20,6 +20,7 @@ model User {
   assignedProperties PropertyAssignment[]
   createdTasks       Task[]
   notifications      Notification[]
+  taskAssignments    TaskAssignment[]
 }
 
 enum Role {
@@ -39,6 +40,7 @@ model Property {
   tasks             Task[]
   checklistTemplate ChecklistTemplate?
   inventoryTemplate InventoryTemplate?
+  guestStays        GuestStay[]
 }
 
 model PropertyAssignment {
@@ -53,6 +55,25 @@ model PropertyAssignment {
   @@unique([userId, propertyId])
   @@index([propertyId])
   @@index([userId])
+}
+
+// ── Guest Stays ───────────────────────────────────────────────────────────────
+
+model GuestStay {
+  id         String    @id @default(cuid())
+  propertyId String
+  guestName  String?
+  checkIn    DateTime
+  checkOut   DateTime
+  notes      String?
+  taskId     String?   @unique
+  createdAt  DateTime  @default(now())
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  task     Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId])
+  @@index([checkOut])
 }
 
 // ── Checklist Template ───────────────────────────────────────────────────────
@@ -97,6 +118,8 @@ model Task {
   photos             Photo[]
   inventoryCounts    InventoryCount[]
   notifications      Notification[]
+  assignments        TaskAssignment[]
+  guestStay          GuestStay?
 
   @@unique([propertyId, dateKey])
   @@index([propertyId, dateKey])
@@ -114,6 +137,19 @@ enum TaskStatus {
 enum ReviewStatus {
   APPROVED
   NEEDS_REDO
+}
+
+// ── Task Assignments ──────────────────────────────────────────────────────────
+
+model TaskAssignment {
+  taskId String
+  userId String
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, userId])
+  @@index([userId])
 }
 
 model ChecklistResponse {
@@ -163,7 +199,6 @@ model InventoryItem {
   id         String  @id @default(cuid())
   templateId String
   name       String
-  threshold  Int?
   order      Int     @default(0)
 
   template InventoryTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
@@ -173,16 +208,23 @@ model InventoryItem {
 }
 
 model InventoryCount {
-  id              String @id @default(cuid())
+  id              String          @id @default(cuid())
   taskId          String
   inventoryItemId String
-  count           Int?
+  level           InventoryLevel?
 
   task          Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
 
   @@unique([taskId, inventoryItemId])
   @@index([taskId])
+}
+
+enum InventoryLevel {
+  NONE
+  LOW
+  MEDIUM
+  FULL
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Building2, LayoutDashboard, Users, ClipboardList, LogOut } from 'lucide-react'
+import { Building2, LayoutDashboard, Users, ClipboardList, LogOut, CalendarDays } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NotificationBell } from './notification-bell'
 
@@ -17,7 +17,8 @@ export default function Nav({ user }: NavProps) {
   const isOwner = user.role === 'OWNER'
 
   const ownerLinks = [
-    { href: '/app/dashboard', label: 'Owner Dashboard', icon: LayoutDashboard },
+    { href: '/app/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/app/calendar', label: 'Calendar', icon: CalendarDays },
     { href: '/app/properties', label: 'Properties', icon: Building2 },
     { href: '/app/employees', label: 'Employees', icon: Users },
     { href: '/app/tasks', label: 'Tasks', icon: ClipboardList },
@@ -74,7 +75,7 @@ export default function Nav({ user }: NavProps) {
 
       {/* ── Mobile bottom nav ─────────────────────────────────────────── */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-neutral-100 bg-white pb-safe">
-        <div className={cn('grid h-16', isOwner ? 'grid-cols-6' : 'grid-cols-2')}>
+        <div className={cn('grid h-16', isOwner ? 'grid-cols-7' : 'grid-cols-2')}>
           {links.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}

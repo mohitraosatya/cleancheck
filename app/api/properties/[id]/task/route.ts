@@ -12,8 +12,14 @@ const taskInclude = {
   },
   photos: { orderBy: { createdAt: 'asc' as const } },
   inventoryCounts: {
-    include: { inventoryItem: { select: { id: true, name: true, threshold: true, order: true } } },
+    include: { inventoryItem: { select: { id: true, name: true, order: true } } },
     orderBy: { inventoryItem: { order: 'asc' as const } },
+  },
+  assignments: {
+    include: { user: { select: { id: true, name: true } } },
+  },
+  guestStay: {
+    select: { id: true, guestName: true, checkIn: true, checkOut: true },
   },
 }
 
@@ -40,7 +46,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   })
 
   if (!task) {
-    // Create task
     const created = await prisma.task.create({
       data: { propertyId, createdByUserId: user.id, dateKey, status: 'OPEN' },
     })
@@ -52,7 +57,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     })
     if (template?.items.length) {
       await prisma.checklistResponse.createMany({
-        data: template.items.map((item) => ({
+        data: template.items.map((item: { id: string }) => ({
           taskId: created.id,
           checklistItemId: item.id,
           checked: false,

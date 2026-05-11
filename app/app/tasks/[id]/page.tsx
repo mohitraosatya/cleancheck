@@ -4,18 +4,24 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
   CheckCircle2, Circle, AlertCircle, ImageIcon,
-  Building2, User, Calendar, MessageSquare
+  Building2, User, Calendar, MessageSquare, LogIn, LogOut as LogOutIcon, Users
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { PageSpinner } from '@/components/ui/spinner'
-import { cn, formatDateTime, statusClass, statusLabel } from '@/lib/utils'
+import { cn, formatDate, formatDateTime, statusClass, statusLabel, levelLabel, levelClass } from '@/lib/utils'
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+type InventoryLevel = 'NONE' | 'LOW' | 'MEDIUM' | 'FULL'
 
 interface ChecklistItem { id: string; label: string; order: number }
 interface ChecklistResponse { id: string; checklistItemId: string; checked: boolean; checklistItem: ChecklistItem }
 interface Photo { id: string; type: string; url: string }
-interface InventoryItem { id: string; name: string; threshold: number | null }
-interface InventoryCount { id: string; inventoryItemId: string; count: number | null; inventoryItem: InventoryItem }
+interface InventoryItem { id: string; name: string; order: number }
+interface InventoryCount { id: string; inventoryItemId: string; level: InventoryLevel | null; inventoryItem: InventoryItem }
+interface GuestStay { id: string; guestName: string | null; checkIn: string; checkOut: string; notes: string | null }
+interface Assignment { user: { id: string; name: string; email: string } }
 
 interface Task {
   id: string; status: string; notes: string | null
@@ -26,7 +32,11 @@ interface Task {
   checklistResponses: ChecklistResponse[]
   photos: Photo[]
   inventoryCounts: InventoryCount[]
+  assignments: Assignment[]
+  guestStay: GuestStay | null
 }
+
+// ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function TaskReviewPage() {
   const { id: taskId } = useParams<{ id: string }>()
@@ -74,10 +84,10 @@ export default function TaskReviewPage() {
     )
   }
 
-  const prePhotos = task.photos.filter((p) => p.type === 'PRE')
-  const postPhotos = task.photos.filter((p) => p.type === 'POST')
-  const invPhotos = task.photos.filter((p) => p.type === 'INVENTORY')
-  const checkedCount = task.checklistResponses.filter((r) => r.checked).length
+  const prePhotos  = task.photos.filter((p: Photo) => p.type === 'PRE')
+  const postPhotos = task.photos.filter((p: Photo) => p.type === 'POST')
+  const invPhotos  = task.photos.filter((p: Photo) => p.type === 'INVENTORY')
+  const checkedCount = task.checklistResponses.filter((r: ChecklistResponse) => r.checked).length
   const canReview = task.status === 'SUBMITTED'
 
   return (
@@ -97,6 +107,26 @@ export default function TaskReviewPage() {
         </span>
       </div>
 
+      {/* Guest stay info */}
+      {task.guestStay && (
+        <div className="bg-white border border-neutral-200 rounded-xl px-5 py-4 mb-4 flex flex-wrap gap-4 text-sm">
+          <span className="flex items-center gap-2 text-green-700">
+            <LogIn className="w-4 h-4" />
+            Check-in: {formatDate(task.guestStay.checkIn)}
+          </span>
+          <span className="flex items-center gap-2 text-red-600">
+            <LogOutIcon className="w-4 h-4" />
+            Check-out: {formatDate(task.guestStay.checkOut)}
+          </span>
+          {task.guestStay.guestName && (
+            <span className="font-medium text-neutral-700">{task.guestStay.guestName}</span>
+          )}
+          {task.guestStay.notes && (
+            <span className="text-neutral-400 text-xs w-full">{task.guestStay.notes}</span>
+          )}
+        </div>
+      )}
+
       {/* Meta */}
       <div className="bg-white border border-neutral-200 rounded-xl px-5 py-4 mb-6 grid grid-cols-2 gap-4">
         <div className="flex items-center gap-2 text-sm">
@@ -111,6 +141,14 @@ export default function TaskReviewPage() {
           <Building2 className="w-4 h-4 text-neutral-400 shrink-0" />
           <span className="text-neutral-500">{task.property.address ?? 'No address'}</span>
         </div>
+        {task.assignments.length > 0 && (
+          <div className="flex items-center gap-2 text-sm col-span-2">
+            <Users className="w-4 h-4 text-neutral-400 shrink-0" />
+            <span className="text-neutral-600">
+              {task.assignments.map((a: Assignment) => a.user.name).join(', ')}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Review feedback */}
@@ -131,7 +169,7 @@ export default function TaskReviewPage() {
           <p className="text-sm text-neutral-400">No checklist items</p>
         ) : (
           <ul className="flex flex-col divide-y divide-neutral-100">
-            {task.checklistResponses.map((r) => (
+            {task.checklistResponses.map((r: ChecklistResponse) => (
               <li key={r.id} className="flex items-center gap-3 py-3">
                 {r.checked
                   ? <CheckCircle2 className="w-5 h-5 text-black shrink-0" />
@@ -167,24 +205,18 @@ export default function TaskReviewPage() {
         }
       </Section>
 
-      {/* Inventory counts */}
+      {/* Inventory levels */}
       {task.inventoryCounts.length > 0 && (
-        <Section title="Inventory Counts">
-          <div className="flex flex-col gap-1">
-            {task.inventoryCounts.map((c) => {
-              const isLow = c.inventoryItem.threshold !== null && c.count !== null && c.count < c.inventoryItem.threshold
-              return (
-                <div key={c.id} className="flex items-center justify-between py-2.5 border-b border-neutral-50 last:border-0">
-                  <span className="text-sm">{c.inventoryItem.name}</span>
-                  <div className="flex items-center gap-2">
-                    {isLow && (
-                      <span className="text-xs bg-neutral-900 text-white px-2 py-0.5 rounded-full font-medium">Low</span>
-                    )}
-                    <span className="text-sm font-medium">{c.count ?? '—'}</span>
-                  </div>
-                </div>
-              )
-            })}
+        <Section title="Inventory">
+          <div className="flex flex-col gap-2">
+            {task.inventoryCounts.map((c: InventoryCount) => (
+              <div key={c.id} className="flex items-center justify-between py-2 border-b border-neutral-50 last:border-0">
+                <span className="text-sm">{c.inventoryItem.name}</span>
+                <span className={cn('text-xs font-semibold px-2.5 py-1 rounded-full', levelClass(c.level))}>
+                  {levelLabel(c.level)}
+                </span>
+              </div>
+            ))}
           </div>
         </Section>
       )}
@@ -199,20 +231,17 @@ export default function TaskReviewPage() {
         </Section>
       )}
 
-      {/* Review action */}
+      {/* Review actions */}
       {canReview && !showReview && (
         <div className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-neutral-100 px-4 py-3 pb-safe flex gap-3">
           <Button
-            variant="secondary"
-            size="lg"
-            className="flex-1"
+            variant="secondary" size="lg" className="flex-1"
             onClick={() => { setDecision('NEEDS_REDO'); setShowReview(true) }}
           >
             Needs Redo
           </Button>
           <Button
-            size="lg"
-            className="flex-1"
+            size="lg" className="flex-1"
             onClick={() => { setDecision('APPROVED'); setShowReview(true) }}
           >
             Approve
@@ -246,6 +275,8 @@ export default function TaskReviewPage() {
   )
 }
 
+// ── Section ───────────────────────────────────────────────────────────────────
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-white border border-neutral-200 rounded-xl mb-4 overflow-hidden">
@@ -256,6 +287,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   )
 }
+
+// ── Photo Grid ────────────────────────────────────────────────────────────────
 
 function PhotoGrid({ photos }: { photos: { id: string; url: string }[] }) {
   return (

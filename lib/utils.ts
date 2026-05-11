@@ -57,3 +57,23 @@ export function statusClass(status: string): string {
   }
   return map[status] ?? 'bg-neutral-100 text-neutral-600'
 }
+
+export function levelLabel(level: string | null | undefined): string {
+  const map: Record<string, string> = {
+    NONE: 'None',
+    LOW: 'Low',
+    MEDIUM: 'Medium',
+    FULL: 'Full',
+  }
+  return level ? (map[level] ?? level) : '—'
+}
+
+export function levelClass(level: string | null | undefined): string {
+  const map: Record<string, string> = {
+    NONE: 'bg-neutral-100 text-neutral-500',
+    LOW: 'bg-red-100 text-red-700',
+    MEDIUM: 'bg-yellow-100 text-yellow-700',
+    FULL: 'bg-green-100 text-green-700',
+  }
+  return level ? (map[level] ?? 'bg-neutral-100 text-neutral-500') : 'bg-neutral-100 text-neutral-400'
+}

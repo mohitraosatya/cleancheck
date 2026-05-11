@@ -2,15 +2,37 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { cn, formatDateTime, statusLabel, statusClass } from '@/lib/utils'
-import { AlertTriangle, ClipboardCheck } from 'lucide-react'
+import { cn, formatDate, formatDateTime, statusLabel, statusClass } from '@/lib/utils'
+import { AlertTriangle, ClipboardCheck, CalendarDays } from 'lucide-react'
+
+type UpcomingStay = {
+  id: string
+  guestName: string | null
+  checkOut: Date
+  property: { name: string }
+  task: { id: string; status: string } | null
+}
+
+type LowInvCount = {
+  id: string
+  inventoryItem: { name: string }
+  task: { id: string; dateKey: string; status: string; property: { name: string } }
+}
+
+type RecentTask = {
+  id: string
+  status: string
+  submittedAt: Date | null
+  property: { name: string }
+  createdBy: { name: string }
+  assignments: { user: { name: string } }[]
+}
 
 export default async function DashboardPage() {
   const user = await getSession()
   if (!user || user.role !== 'OWNER') redirect('/app/properties')
 
-  const [recentTasks, lowInventory] = await Promise.all([
-    // Recent submissions
+  const [recentTasks, lowInventory, upcomingStays] = await Promise.all([
     prisma.task.findMany({
       where: { status: { in: ['SUBMITTED', 'APPROVED', 'NEEDS_REDO'] } },
       orderBy: { submittedAt: 'desc' },
@@ -19,16 +41,13 @@ export default async function DashboardPage() {
         property: { select: { name: true } },
         createdBy: { select: { name: true } },
         _count: { select: { photos: true } },
+        assignments: { include: { user: { select: { name: true } } } },
       },
     }),
-    // Low inventory counts
     prisma.inventoryCount.findMany({
-      where: {
-        inventoryItem: { threshold: { not: null } },
-        count: { not: null },
-      },
+      where: { level: 'LOW' },
       include: {
-        inventoryItem: { select: { name: true, threshold: true } },
+        inventoryItem: { select: { name: true } },
         task: {
           select: {
             id: true, dateKey: true, status: true,
@@ -39,29 +58,73 @@ export default async function DashboardPage() {
       orderBy: { task: { dateKey: 'desc' } },
       take: 20,
     }),
-  ])
-
-  const lowFlags = lowInventory.filter(
-    (c) => c.count !== null && c.inventoryItem.threshold !== null && c.count < c.inventoryItem.threshold!
-  )
+    prisma.guestStay.findMany({
+      where: {
+        checkOut: {
+          gte: new Date(),
+          lte: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        },
+      },
+      orderBy: { checkOut: 'asc' },
+      take: 6,
+      include: {
+        property: { select: { name: true } },
+        task: { select: { id: true, status: true } },
+      },
+    }),
+  ]) as [RecentTask[], LowInvCount[], UpcomingStay[]]
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-1">Owner Dashboard</h1>
-      <p className="text-sm text-neutral-500 mb-8">Recent activity & alerts</p>
+      <h1 className="text-2xl font-bold mb-1">Dashboard</h1>
+      <p className="text-sm text-neutral-500 mb-8">Recent activity &amp; alerts</p>
+
+      {/* Upcoming checkouts */}
+      {upcomingStays.length > 0 && (
+        <section className="mb-8">
+          <div className="flex items-center gap-2 mb-4">
+            <CalendarDays className="w-4 h-4 text-neutral-700" />
+            <h2 className="font-semibold text-sm">Upcoming Check-outs</h2>
+            <Link href="/app/calendar" className="ml-auto text-xs text-neutral-400 hover:text-black transition-colors">
+              View calendar →
+            </Link>
+          </div>
+          <div className="flex flex-col gap-2">
+            {upcomingStays.map((s: UpcomingStay) => (
+              <div
+                key={s.id}
+                className="bg-white border border-neutral-200 rounded-xl px-5 py-3 flex items-center gap-4"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{s.property.name}</p>
+                  {s.guestName && <p className="text-xs text-neutral-400">{s.guestName}</p>}
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-xs font-semibold">{formatDate(s.checkOut)}</p>
+                  {s.task && (
+                    <Link href={`/app/tasks/${s.task.id}`} className="text-[10px] text-neutral-400 hover:text-black">
+                      {statusLabel(s.task.status)}
+                    </Link>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Low inventory alerts */}
-      {lowFlags.length > 0 && (
+      {lowInventory.length > 0 && (
         <section className="mb-8">
           <div className="flex items-center gap-2 mb-4">
             <AlertTriangle className="w-4 h-4 text-neutral-700" />
             <h2 className="font-semibold text-sm">Low Inventory</h2>
             <span className="ml-auto text-xs bg-black text-white px-2 py-0.5 rounded-full">
-              {lowFlags.length}
+              {lowInventory.length}
             </span>
           </div>
           <div className="flex flex-col gap-2">
-            {lowFlags.map((c) => (
+            {lowInventory.map((c: LowInvCount) => (
               <Link
                 key={c.id}
                 href={`/app/tasks/${c.task.id}`}
@@ -71,29 +134,27 @@ export default async function DashboardPage() {
                   <p className="text-sm font-medium">{c.task.property.name}</p>
                   <p className="text-xs text-neutral-500 mt-0.5">{c.inventoryItem.name}</p>
                 </div>
-                <div className="text-right shrink-0">
-                  <span className="text-xs bg-neutral-900 text-white px-2.5 py-1 rounded-full font-semibold">
-                    {c.count} / {c.inventoryItem.threshold} min
-                  </span>
-                </div>
+                <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-semibold shrink-0">
+                  Low
+                </span>
               </Link>
             ))}
           </div>
         </section>
       )}
 
-      {/* Recent submissions */}
+      {/* Recent activity */}
       <section>
         <div className="flex items-center gap-2 mb-4">
           <ClipboardCheck className="w-4 h-4 text-neutral-700" />
-          <h2 className="font-semibold text-sm">Recent Submissions</h2>
+          <h2 className="font-semibold text-sm">Recent Activity</h2>
         </div>
 
         {recentTasks.length === 0 ? (
-          <div className="text-center py-12 text-neutral-400 text-sm">No submissions yet</div>
+          <div className="text-center py-12 text-neutral-400 text-sm">No activity yet</div>
         ) : (
           <div className="flex flex-col gap-3">
-            {recentTasks.map((task) => (
+            {recentTasks.map((task: RecentTask) => (
               <Link
                 key={task.id}
                 href={`/app/tasks/${task.id}`}
@@ -103,7 +164,11 @@ export default async function DashboardPage() {
                   <div className="min-w-0">
                     <p className="font-semibold text-sm">{task.property.name}</p>
                     <p className="text-xs text-neutral-400 mt-0.5">
-                      {task.createdBy.name} · {formatDateTime(task.submittedAt)}
+                      {task.assignments.length > 0
+                        ? task.assignments.map((a: { user: { name: string } }) => a.user.name).join(', ')
+                        : task.createdBy.name}
+                      {' · '}
+                      {formatDateTime(task.submittedAt)}
                     </p>
                   </div>
                   <span className={cn('text-xs font-semibold px-2.5 py-1 rounded-full shrink-0', statusClass(task.status))}>

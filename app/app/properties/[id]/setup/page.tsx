@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { PageSpinner } from '@/components/ui/spinner'
 
 interface ChecklistItem { id: string; label: string; order: number }
-interface InventoryItem { id: string; name: string; threshold: number | null; order: number }
+interface InventoryItem { id: string; name: string; order: number }
 interface SetupData {
   checklist: { id: string; items: ChecklistItem[] } | null
   inventory: { id: string; enabled: boolean; items: InventoryItem[] } | null
@@ -22,13 +22,10 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(true)
   const [propName, setPropName] = useState('')
 
-  // Checklist form
   const [newItem, setNewItem] = useState('')
   const [addingCL, setAddingCL] = useState(false)
 
-  // Inventory form
   const [newInvName, setNewInvName] = useState('')
-  const [newInvThreshold, setNewInvThreshold] = useState('')
   const [addingINV, setAddingINV] = useState(false)
 
   const fetchData = useCallback(async () => {
@@ -69,13 +66,8 @@ export default function SetupPage() {
   const addInventoryItem = async () => {
     if (!newInvName.trim()) return
     setAddingINV(true)
-    await call({
-      type: 'inventory', action: 'add',
-      name: newInvName,
-      threshold: newInvThreshold || null,
-    })
+    await call({ type: 'inventory', action: 'add', name: newInvName })
     setNewInvName('')
-    setNewInvThreshold('')
     setAddingINV(false)
   }
 
@@ -93,7 +85,7 @@ export default function SetupPage() {
       </button>
 
       <h1 className="text-2xl font-bold mb-1">{propName}</h1>
-      <p className="text-sm text-neutral-500 mb-8">Setup checklist & inventory templates</p>
+      <p className="text-sm text-neutral-500 mb-8">Setup checklist &amp; inventory templates</p>
 
       {/* ── Checklist Template ─────────────────────────────────────────── */}
       <section className="bg-white border border-neutral-200 rounded-xl mb-6">
@@ -104,10 +96,9 @@ export default function SetupPage() {
         </div>
 
         <div className="px-5 py-4">
-          {/* Items */}
           {cl?.items.length ? (
             <ul className="flex flex-col gap-1 mb-4">
-              {cl.items.map((item) => (
+              {cl.items.map((item: ChecklistItem) => (
                 <li key={item.id} className="flex items-center gap-2 py-2 border-b border-neutral-50 last:border-0">
                   <span className="flex-1 text-sm">{item.label}</span>
                   <button
@@ -123,7 +114,6 @@ export default function SetupPage() {
             <p className="text-sm text-neutral-400 mb-4">No items yet. Add your first checklist item.</p>
           )}
 
-          {/* Add item */}
           <div className="flex gap-2">
             <Input
               value={newItem}
@@ -132,12 +122,7 @@ export default function SetupPage() {
               onKeyDown={(e) => { if (e.key === 'Enter') addChecklistItem() }}
               className="flex-1"
             />
-            <Button
-              size="sm"
-              onClick={addChecklistItem}
-              loading={addingCL}
-              disabled={!newItem.trim()}
-            >
+            <Button size="sm" onClick={addChecklistItem} loading={addingCL} disabled={!newItem.trim()}>
               <Plus className="w-4 h-4" />
               Add
             </Button>
@@ -164,35 +149,25 @@ export default function SetupPage() {
         <div className="px-5 py-4">
           {!inv?.enabled ? (
             <p className="text-sm text-neutral-400">
-              Enable the toggle above to add inventory items with optional count thresholds.
+              Enable the toggle above to add inventory items. Cleaners will report each item as None, Low, Medium, or Full.
             </p>
           ) : (
             <>
-              {inv.items.length > 0 && (
-                <div className="mb-4">
-                  <div className="grid grid-cols-[1fr_auto_auto] gap-2 text-xs text-neutral-400 font-semibold uppercase tracking-wider mb-2 px-1">
-                    <span>Item</span>
-                    <span className="text-right">Low threshold</span>
-                    <span />
-                  </div>
-                  {inv.items.map((item) => (
-                    <div key={item.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 py-2.5 border-b border-neutral-50 last:border-0">
-                      <span className="text-sm">{item.name}</span>
-                      <span className="text-sm text-right text-neutral-500">
-                        {item.threshold !== null ? `< ${item.threshold}` : '—'}
-                      </span>
+              {inv.items.length > 0 ? (
+                <ul className="flex flex-col gap-1 mb-4">
+                  {inv.items.map((item: InventoryItem) => (
+                    <li key={item.id} className="flex items-center gap-2 py-2.5 border-b border-neutral-50 last:border-0">
+                      <span className="flex-1 text-sm">{item.name}</span>
                       <button
                         onClick={() => deleteInventoryItem(item.id)}
                         className="p-1.5 rounded text-neutral-400 hover:text-red-500 transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
-                    </div>
+                    </li>
                   ))}
-                </div>
-              )}
-
-              {inv.items.length === 0 && (
+                </ul>
+              ) : (
                 <p className="text-sm text-neutral-400 mb-4">No items yet.</p>
               )}
 
@@ -200,29 +175,17 @@ export default function SetupPage() {
                 <Input
                   value={newInvName}
                   onChange={(e) => setNewInvName(e.target.value)}
-                  placeholder="Item name"
+                  placeholder="Item name (e.g. Toilet paper)"
                   className="flex-1"
+                  onKeyDown={(e) => { if (e.key === 'Enter') addInventoryItem() }}
                 />
-                <Input
-                  type="number"
-                  min={0}
-                  value={newInvThreshold}
-                  onChange={(e) => setNewInvThreshold(e.target.value)}
-                  placeholder="Min qty"
-                  className="w-24"
-                />
-                <Button
-                  size="sm"
-                  onClick={addInventoryItem}
-                  loading={addingINV}
-                  disabled={!newInvName.trim()}
-                >
+                <Button size="sm" onClick={addInventoryItem} loading={addingINV} disabled={!newInvName.trim()}>
                   <Plus className="w-4 h-4" />
                   Add
                 </Button>
               </div>
               <p className="text-xs text-neutral-400 mt-2">
-                &quot;Min qty&quot; triggers a Low badge when count falls below it.
+                Cleaners will set each item to None, Low, Medium, or Full when completing a task.
               </p>
             </>
           )}

@@ -20,9 +20,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       photos: { orderBy: { createdAt: 'asc' } },
       inventoryCounts: {
         include: {
-          inventoryItem: { select: { id: true, name: true, threshold: true, order: true } },
+          inventoryItem: { select: { id: true, name: true, order: true } },
         },
         orderBy: { inventoryItem: { order: 'asc' } },
+      },
+      assignments: {
+        include: { user: { select: { id: true, name: true, email: true } } },
+      },
+      guestStay: {
+        select: { id: true, guestName: true, checkIn: true, checkOut: true, notes: true },
       },
     },
   })
