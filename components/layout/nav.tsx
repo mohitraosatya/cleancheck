@@ -17,7 +17,7 @@ export default function Nav({ user }: NavProps) {
   const isOwner = user.role === 'OWNER'
 
   const ownerLinks = [
-    { href: '/app/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/app/dashboard', label: 'Owner Dashboard', icon: LayoutDashboard },
     { href: '/app/properties', label: 'Properties', icon: Building2 },
     { href: '/app/employees', label: 'Employees', icon: Users },
     { href: '/app/tasks', label: 'Tasks', icon: ClipboardList },
